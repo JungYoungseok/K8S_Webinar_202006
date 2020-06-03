@@ -1,0 +1,224 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: datadog-agent
+  labels:
+    app: datadog-agent
+    service: datadog-agent
+spec:
+  revisionHistoryLimit: 10
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: datadog-agent
+  template:
+    metadata:
+      labels:
+        app: datadog-agent
+        service: datadog-agent
+      name: datadog-agent
+      annotations:
+        sidecar.istio.io/inject: "false"
+        container.apparmor.security.beta.kubernetes.io/system-probe: unconfined
+    spec:
+      serviceAccountName: datadog-agent
+      containers:
+        - name: datadog-agent
+          image: datadog/agent:7.19.2
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8125
+              hostPort: 8125
+              name: dogstatsdport
+              protocol: UDP
+            - containerPort: 8126
+              hostPort: 8126
+              name: traceport
+              protocol: TCP
+            - containerPort: 5555
+              hostPort: 5555
+              name: healthport
+              protocol: TCP
+          resources:
+            requests:
+              memory: "200Mi"
+              cpu: "0.25"
+            limits:
+              memory: "750Mi"
+              cpu: "1"
+          env:
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: datadog-secret
+                  key: api-key
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_SYSTEM_PROBE_ENABLED
+              value: "true"
+            - name: DD_SYSTEM_PROBE_EXTERNAL
+              value: "true"
+            - name: DD_SYSPROBE_SOCKET
+              value: "/var/run/sysprobe/sysprobe.sock"
+            - name: DD_COLLECT_KUBERNETES_EVENTS
+              value: "true"
+            - name: DD_LEADER_ELECTION
+              value: "true"
+            - name: KUBERNETES
+              value: "true"
+            - name: DD_KUBERNETES_KUBELET_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: DD_APM_ENABLED
+              value: "true"
+            - name: DD_AC_EXCLUDE
+              value: "name:datadog-agent name:agent name:system-probe"
+            - name: DD_APM_NON_LOCAL_TRAFFIC
+              value: "true"
+            - name: USE_DOGSTATSD
+              value: "true"
+            - name: DD_DOGSTATSD_NON_LOCAL_TRAFFIC
+              value: "true"
+            - name: DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL
+              value: "true"
+            - name: DD_LOGS_CONFIG_USE_HTTP
+              value: "true"
+            - name: DD_LOGS_CONFIG_USE_COMPRESSION
+              value: "true"
+            - name: DD_LOGS_CONFIG_COMPRESSION_LEVEL
+              value: "6"
+            - name: DD_LOGS_ENABLED
+              value: "true"
+            - name: DD_TAGS
+              value: "env:aws-prd cluster-name:analysis-production"
+            - name: DD_TRACE_ANALYTICS_ENABLED
+              value: "true"
+            - name: DD_PROCESS_AGENT_ENABLED
+              value: "true"
+            - name: DD_KUBERNETES_POD_LABELS_AS_TAGS
+              value: '{"service":"service","team":"team"}'
+            - name: DD_HEALTH_PORT
+              value: "5555"
+            - name: DD_KUBELET_TLS_VERIFY
+              value: "false"
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - name: dockersocket
+              mountPath: /var/run/docker.sock
+            - name: logpath
+              mountPath: /var/log/pods
+            - name: dockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: procdir
+              mountPath: /host/proc
+              readOnly: true
+            - name: cgroups
+              mountPath: /host/sys/fs/cgroup
+              readOnly: true
+            - name: passwd
+              mountPath: /etc/passwd
+              readOnly: true
+            - name: pointdir
+              mountPath: /var/lib/datadog-agent/logs
+            - name: sysprobe-run
+              mountPath: /var/run/sysprobe
+            - name: s6-run
+              mountPath: /var/run/s6
+            - name: dockerpath
+              mountPath: /var/vcap/store/docker/docker/containers/
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5555
+            initialDelaySeconds: 15
+            periodSeconds: 5
+        - name: system-probe
+          image: datadog/agent:7.19.2
+          imagePullPolicy: Always
+          command:
+            - /opt/datadog-agent/embedded/bin/system-probe
+          env:
+            - name: DD_SYSTEM_PROBE_ENABLED
+              value: "true"
+            - name: DD_SYSPROBE_SOCKET
+              value: "/var/run/sysprobe/sysprobe.sock"
+            - name: DD_DISABLE_DNS_INSPECTION
+              value: "false"
+            - name: DD_TAGS
+              value: "env:aws-prd cluster-name:analysis-production"
+            - name: DD_KUBERNETES_POD_LABELS_AS_TAGS
+              value: '{"service":"service","team":"team"}'
+            - name: DD_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: datadog-secret
+                  key: api-key
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          resources:
+            limits:
+              cpu: "0.75"
+              memory: "450Mi"
+            requests:
+              cpu: "0.25"
+              memory: "150Mi"
+          securityContext:
+            capabilities:
+              add:
+                - SYS_ADMIN
+                - SYS_RESOURCE
+                - SYS_PTRACE
+                - NET_ADMIN
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /host/proc
+              name: procdir
+              readOnly: true
+            - mountPath: /host/sys/fs/cgroup
+              name: cgroups
+              readOnly: true
+            - mountPath: /sys/kernel/debug
+              name: debugfs
+            - mountPath: /var/run/sysprobe
+              name: sysprobe-run
+      volumes:
+        - hostPath:
+            path: /var/run/docker.sock
+          name: dockersocket
+        - hostPath:
+            path: /proc
+          name: procdir
+        - hostPath:
+            path: /var/lib/datadog-agent/logs
+          name: pointdir
+        - hostPath:
+            path: /var/log/pods
+          name: logpath
+        - hostPath:
+            path: /var/lib/docker/containers
+          name: dockercontainers
+        - hostPath:
+            path: /sys/fs/cgroup
+          name: cgroups
+        - hostPath:
+            path: /etc/passwd
+          name: passwd
+        - hostPath:
+            path: /sys/kernel/debug
+          name: debugfs
+        - name: sysprobe-run
+          emptyDir: {}
+        - name: s6-run
+          emptyDir: {}
+        - hostPath:
+            path: /var/vcap/store/docker/docker/containers/
+          name: dockerpath
