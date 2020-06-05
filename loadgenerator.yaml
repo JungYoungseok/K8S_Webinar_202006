@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgenerator-v1.1
+  labels:
+    app: loadgenerator
+    version: v1
+    service: loadgenerator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgenerator
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: loadgenerator
+        version: v1
+      annotations:
+        sidecar.istio.io/inject: "false"
+
+    spec:
+      containers:
+      - name: loadgenerator
+        image: busybox
+        command: ["/bin/sh"]
+        args: ["-c", "while true; do wget -q -O- http://172.20.90.226:9080/productpage>>dev/null; sleep 1;wget -q -O- http://172.20.90.226:9080/health>>dev/null; sleep 1;wget -q -O- http://172.20.90.226:9080/api/v1/products/0>>dev/null; sleep 1;wget -q -O- http://172.20.90.226:9080/api/v1/products/0/reviews>>dev/null; sleep 1;wget -q -O- http://172.20.90.226:9080/api/v1/products/0/ratings>>dev/null; sleep 1;wget -q -O- http://172.20.90.226:9080/api/v1/products>>dev/null; sleep 1; done"]
